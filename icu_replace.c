@@ -55,6 +55,7 @@ static void icuReplaceAllFunc(
 
   (void)argc;  /* Unused parameter */
 
+  nInput = sqlite3_value_bytes16(argv[1]); // Would possibly invalidate zString if called after next statement.
   const UChar *zString = sqlite3_value_text16(argv[1]);
 
   /* If the text is NULL, then the result is also NULL. */
@@ -94,20 +95,18 @@ static void icuReplaceAllFunc(
 /*
   int32_t   uregex_replaceAll (URegularExpression *regexp, const UChar *replacementText, int32_t replacementLength, UChar *destBuf, int32_t destCapacity, UErrorCode *status)
 */
-  nInput = sqlite3_value_bytes16(argv[1]);
-  nOutput = nInput * 2 + 2;
-  zOutput = sqlite3_malloc(nOutput);
+  nOutput = nInput; // Expect output length = input length.
+  zOutput = sqlite3_malloc((nOutput+1) * sizeof(UChar)); // Take one more codepoint for null-termination, just in case.
   if( !zOutput ){
     return;
   }
 
   /* Attempt the replace */
-  destLength = uregex_replaceAll(pExpr, zReplacement, -1, zOutput, nOutput/2, &status);
+  destLength = uregex_replaceAll(pExpr, zReplacement, -1, zOutput, nOutput, &status);
   if( !U_SUCCESS(status) ){
     if (U_BUFFER_OVERFLOW_ERROR == status) {
-      //sqlite3_log(SQLITE_ERROR, "%d -> %d", nOutput/2, destLength);
       zOld = zOutput;
-      zOutput = sqlite3_realloc(zOutput, destLength * 2);
+      zOutput = sqlite3_realloc(zOutput, (destLength+1) * sizeof(UChar)); // Again one extra codepoint for null-termination.
       if ( !zOutput ) {
         xFree(zOld);
         icuFunctionError(context, "uregex_replaceAll", status);
@@ -122,6 +121,7 @@ static void icuReplaceAllFunc(
       return;
     }
   }
+  zOutput[destLength] = 0; // Hard null-terminate to be sure as icu function not fully understood.
 
   /* Set the text that the regular expression operates on to a NULL
   ** pointer. This is not really necessary, but it is tidier than
