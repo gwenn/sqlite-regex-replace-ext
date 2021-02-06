@@ -33,6 +33,7 @@ static void icuFunctionError(
 ){
   char zBuf[128];
   sqlite3_snprintf(128, zBuf, "ICU error: %s(): %s", zName, u_errorName(e));
+  zBuf[127] = '\0';
   sqlite3_result_error(pCtx, zBuf, -1);
 }
 /* stolen from icu standard extension */
