@@ -33,6 +33,7 @@ static void icuFunctionError(
 ){
   char zBuf[128];
   sqlite3_snprintf(128, zBuf, "ICU error: %s(): %s", zName, u_errorName(e));
+  zBuf[127] = '\0';
   sqlite3_result_error(pCtx, zBuf, -1);
 }
 /* stolen from icu standard extension */
@@ -48,17 +49,17 @@ static void icuReplaceAllFunc(
 ){
   UErrorCode status = U_ZERO_ERROR;
   URegularExpression *pExpr;
-  UChar *zOutput, *zOld;
-  int nInput;
-  int nOutput;
-  int32_t destLength;
+  const UChar *zInput;           /* Pointer to input string */
+  UChar *zOutput = 0;             /* Pointer to output buffer */
+  int nOut;                    /* Size of output buffer in bytes */
+  int cnt;
 
   (void)argc;  /* Unused parameter */
 
-  const UChar *zString = sqlite3_value_text16(argv[1]);
+  zInput = sqlite3_value_text16(argv[1]);
 
   /* If the text is NULL, then the result is also NULL. */
-  if( !zString ){
+  if( !zInput ){
     return;
   }
 
@@ -86,41 +87,38 @@ static void icuReplaceAllFunc(
   }
 
   /* Configure the text that the regular expression operates on. */
-  uregex_setText(pExpr, zString, -1, &status);
+  uregex_setText(pExpr, zInput, -1, &status);
   if( !U_SUCCESS(status) ){
     icuFunctionError(context, "uregex_setText", status);
     return;
   }
+  /* Expect output length = input length. */
+  nOut = sqlite3_value_bytes16(argv[1]);
 /*
   int32_t   uregex_replaceAll (URegularExpression *regexp, const UChar *replacementText, int32_t replacementLength, UChar *destBuf, int32_t destCapacity, UErrorCode *status)
 */
-  nInput = sqlite3_value_bytes16(argv[1]);
-  nOutput = nInput * 2 + 2;
-  zOutput = sqlite3_malloc(nOutput);
-  if( !zOutput ){
-    return;
-  }
-
-  /* Attempt the replace */
-  destLength = uregex_replaceAll(pExpr, zReplacement, -1, zOutput, nOutput/2, &status);
-  if( !U_SUCCESS(status) ){
-    if (U_BUFFER_OVERFLOW_ERROR == status) {
-      //sqlite3_log(SQLITE_ERROR, "%d -> %d", nOutput/2, destLength);
-      zOld = zOutput;
-      zOutput = sqlite3_realloc(zOutput, destLength * 2);
-      if ( !zOutput ) {
-        xFree(zOld);
-        icuFunctionError(context, "uregex_replaceAll", status);
-        return;
-      }
-      status = U_ZERO_ERROR;
-      destLength = uregex_replaceAll(pExpr, zReplacement, -1, zOutput, destLength, &status);
-    }
-    if( !U_SUCCESS(status) ){
-      xFree(zOutput);
-      icuFunctionError(context, "uregex_replaceAll", status);
+  for(cnt=0; cnt<2; cnt++){
+    UChar *zNew = sqlite3_realloc(zOutput, nOut);
+    if( zNew==0 ){
+      sqlite3_free(zOutput);
+      sqlite3_result_error_nomem(context);
       return;
     }
+    zOutput = zNew;
+    status = U_ZERO_ERROR;
+    /* Attempt the replace */
+    nOut = 2*uregex_replaceAll(pExpr, zReplacement, -1, zOutput, nOut/2, &status);
+    if( status==U_BUFFER_OVERFLOW_ERROR ){
+      assert( cnt==0 );
+      continue;
+    }
+    break;
+  }
+
+  if( !U_SUCCESS(status) ){
+    sqlite3_free(zOutput);
+    icuFunctionError(context, "uregex_replaceAll", status);
+    return;
   }
 
   /* Set the text that the regular expression operates on to a NULL
@@ -130,7 +128,7 @@ static void icuReplaceAllFunc(
   */
   uregex_setText(pExpr, 0, 0, &status);
 
-  sqlite3_result_text16(context, zOutput, -1, xFree);
+  sqlite3_result_text16(context, zOutput, nOut, xFree);
 }
 
 /* SQLite invokes this routine once when it loads the extension.
