@@ -94,6 +94,13 @@ static void icuReplaceAllFunc(
   }
   /* Expect output length = input length. */
   nOut = sqlite3_value_bytes16(argv[1]);
+  if( nOut==0 ){ // or output length = replacement length
+    nOut = sqlite3_value_bytes16(argv[2]);
+  }
+  if( nOut==0 ){ // if both input and replacement are empty
+    sqlite3_result_text16(context, "", 0, SQLITE_STATIC);
+    return;
+  }
 /*
   int32_t   uregex_replaceAll (URegularExpression *regexp, const UChar *replacementText, int32_t replacementLength, UChar *destBuf, int32_t destCapacity, UErrorCode *status)
 */
